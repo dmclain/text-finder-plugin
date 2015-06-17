@@ -87,7 +87,16 @@ public class TextFinderPublisher extends Recorder implements Serializable {
 
             if(alsoCheckConsoleOutput) {
                 logger.println("Checking console output");
-                foundText |= checkFile(build.getLogFile(), compilePattern(logger), logger, true);
+                try {
+                    // Assume default encoding and text files
+                    reader = new BufferedReader(new FileReader(build.getLogFile()), 8 * 1024 * 1024);
+                    foundText |= checkReader(reader, compilePattern(logger), logger, true);
+                } catch (IOException e) {
+                    logger.println("Jenkins Text Finder: Error reading" +
+                        " file '" + f + "' -- ignoring");
+                } finally {
+                    IOUtils.closeQuietly(reader);
+                }
             } else {
                 // printing this when checking console output will cause the plugin
                 // to find this line, which would be pointless.
@@ -160,31 +169,44 @@ public class TextFinderPublisher extends Recorder implements Serializable {
      *      when we are scanning the console output, because otherwise we'll loop forever. 
      */
     private boolean checkFile(File f, Pattern pattern, PrintStream logger, boolean abortAfterFirstHit) {
-        boolean logFilename = true;
         boolean foundText = false;
         BufferedReader reader=null;
         try {
             // Assume default encoding and text files
-            String line;
             reader = new BufferedReader(new FileReader(f));
-            while ((line = reader.readLine()) != null) {
-                Matcher matcher = pattern.matcher(line);
-                if (matcher.find()) {
-                    if (logFilename) {// first occurrence
-                        logger.println(f + ":");
-                        logFilename = false;
-                    }
-                    logger.println(line);
-                    foundText = true;
-                    if(abortAfterFirstHit)
-                        return true;
-                }
-            }
+            foundText = checkReader(reader, pattern, logger, abortAfterFirstHit);
         } catch (IOException e) {
             logger.println("Jenkins Text Finder: Error reading" +
                 " file '" + f + "' -- ignoring");
         } finally {
             IOUtils.closeQuietly(reader);
+        }
+        return foundText;
+    }
+
+    /**
+     * Search the given regexp pattern in the reader.
+     *
+     * @param abortAfterFirstHit
+     *      true to return immediately as soon as the first hit is found. this is necessary
+     *      when we are scanning the console output, because otherwise we'll loop forever. 
+     */
+    private boolean checkReader(Reader reader, Pattern pattern, PrintStream logger, boolean abortAfterFirstHit) throws IOException {
+        // Assume default encoding and text files
+        boolean logFilename = true;
+        String line;
+        while ((line = reader.readLine()) != null) {
+            Matcher matcher = pattern.matcher(line);
+            if (matcher.find()) {
+                if (logFilename) {// first occurrence
+                    logger.println(f + ":");
+                    logFilename = false;
+                }
+                logger.println(line);
+                foundText = true;
+                if(abortAfterFirstHit)
+                    return true;
+            }
         }
         return foundText;
     }
